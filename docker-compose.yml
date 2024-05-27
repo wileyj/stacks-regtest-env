@@ -9,8 +9,8 @@ x-common-vars:
   - &BITCOIN_RPC_PORT 18443
   - &BITCOIN_RPC_USER btc
   - &BITCOIN_RPC_PASS btc
-  - &MINE_INTERVAL ${MINE_INTERVAL:-30s}
-  - &MINE_INTERVAL_EPOCH25 ${MINE_INTERVAL_EPOCH25:-10s} # 10 second bitcoin block times in epoch 2.5
+  - &MINE_INTERVAL ${MINE_INTERVAL:-300s}
+  - &MINE_INTERVAL_EPOCH25 ${MINE_INTERVAL_EPOCH25:-300s} # 10 second bitcoin block times in epoch 2.5
   - &MINE_INTERVAL_EPOCH3 ${MINE_INTERVAL_EPOCH3:-30s} # 10 minute bitcoin block times in epoch 3
   - &NAKAMOTO_BLOCK_INTERVAL 2 # seconds to wait between issuing stx-transfer transactions (which triggers Nakamoto block production)
   - &STACKS_20_HEIGHT ${STACKS_20_HEIGHT:-0}
@@ -21,7 +21,7 @@ x-common-vars:
   - &STACKS_23_HEIGHT ${STACKS_23_HEIGHT:-106}
   - &STACKS_24_HEIGHT ${STACKS_24_HEIGHT:-107}
   - &STACKS_25_HEIGHT ${STACKS_25_HEIGHT:-108}
-  - &STACKS_30_HEIGHT ${STACKS_30_HEIGHT:-131}
+  - &STACKS_30_HEIGHT ${STACKS_30_HEIGHT:-41111}
   - &STACKING_CYCLES ${STACKING_CYCLES:-1} # number of cycles to stack-stx or stack-extend for
   - &POX_PREPARE_LENGTH ${POX_PREPARE_LENGTH:-5}
   - &POX_REWARD_LENGTH ${POX_REWARD_LENGTH:-20}
