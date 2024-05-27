@@ -1,7 +1,7 @@
 version: "3.9"
 
 x-common-vars:
-  - &STACKS_BLOCKCHAIN_COMMIT 441b7edf606a4e8ea5c897d2e8b9c844b2b2bf3f
+  - &STACKS_BLOCKCHAIN_COMMIT 52d425dd6ed7c15b1944b7aa4a5c645c4e322227
   - &STACKS_API_COMMIT 1c325dfc04d9a81738c48961b4eef1c28fccb3bd
   - &BTC_ADDR miEJtNKa3ASpA19v5ZhvbKTEieYjLpzCYT
   - &MINER_SEED 9e446f6b0c6a96cf2190e54bcd5a8569c3e386f091605499464389b8d4e0bfc201 # stx: STEW4ZNT093ZHK4NEQKX8QJGM2Y7WWJ2FQQS5C19, btc: miEJtNKa3ASpA19v5ZhvbKTEieYjLpzCYT, pub_key: 035379aa40c02890d253cfa577964116eb5295570ae9f7287cbae5f2585f5b2c7c, wif: cStMQXkK5yTFGP3KbNXYQ3sJf2qwQiKrZwR9QJnksp32eKzef1za
@@ -9,7 +9,7 @@ x-common-vars:
   - &BITCOIN_RPC_PORT 18443
   - &BITCOIN_RPC_USER btc
   - &BITCOIN_RPC_PASS btc
-  - &MINE_INTERVAL ${MINE_INTERVAL:-1s}
+  - &MINE_INTERVAL ${MINE_INTERVAL:-30s}
   - &MINE_INTERVAL_EPOCH25 ${MINE_INTERVAL_EPOCH25:-10s} # 10 second bitcoin block times in epoch 2.5
   - &MINE_INTERVAL_EPOCH3 ${MINE_INTERVAL_EPOCH3:-30s} # 10 minute bitcoin block times in epoch 3
   - &NAKAMOTO_BLOCK_INTERVAL 2 # seconds to wait between issuing stx-transfer transactions (which triggers Nakamoto block production)
@@ -27,7 +27,12 @@ x-common-vars:
   - &POX_REWARD_LENGTH ${POX_REWARD_LENGTH:-20}
   - &REWARD_RECIPIENT ${REWARD_RECIPIENT:-STQM73RQC4EX0A07KWG1J5ECZJYBZS4SJ4ERC6WN} # priv: 6ad9cadb42d4edbfbe0c5bfb3b8a4125ddced021c4174f829b714ccbf527f02001
   - &EXIT_FROM_MONITOR 1 # set to "1" to automatically shut down via monitor.ts
-
+  - &ELECTRS_RPC_PORT ${ELECTRS_RPC_PORT:-60401}
+  - &MEMPOOL_WEB_PORT ${MEMPOOL_WEB_PORT:-8083}
+  - &MEMPOOL_DB_USER ${MEMPOOL_DB_USER:-mempool}
+  - &MEMPOOL_DB_DATABASE ${MEMPOOL_DB_DATABASE:-mempool}
+  - &MEMPOOL_DB_PASSWORD ${MEMPOOL_DB_PASSWORD:-mempool}
+  - &MEMPOOL_DB_ROOT_PASSWORD ${MEMPOOL_DB_ROOT_PASSWORD:-admin}
 services:
   bitcoind:
     networks:
@@ -366,7 +371,117 @@ services:
         envsubst < config.toml.in > config.toml
         exec stacks-signer run --config config.toml
 
+  stacks-explorer:
+    networks:
+      - stacks
+    image: hirosystems/explorer:1.178
+    container_name: stacks-explorer
+    stop_grace_period: 5s
+    ports:
+      - 3020:3000
+    depends_on:
+      - stacks-node
+      - stacks-api
+      - postgres
+      - mempool-web
+    environment:
+      - NEXT_PUBLIC_TESTNET_API_SERVER=http://nuc.local:3999
+      - NEXT_PUBLIC_TESTNET_BTC_BLOCK_BASE_URL=http://mempool-web:8083/block
+      - NEXT_PUBLIC_TESTNET_BTC_TX_BASE_URL=http://mempool-web:8083/tx
+      - NEXT_PUBLIC_TESTNET_BTC_ADDRESS_BASE_URL=http://mempool-web:8083/address
+  electrs:
+    networks:
+      - stacks
+    image: mempool/electrs:latest
+    container_name: electrs
+    stop_grace_period: 5s
+    ports:
+      - 60401:60401
+      - 3002:3002
+    environment:
+      RUST_BACKTRACE: full
+    volumes:
+      - 'electrs_data:/electrs'
+    entrypoint:
+      /bin/electrs
+    command:  |
+      --network regtest 
+      --address-search
+      --jsonrpc-import 
+      --cookie "btc:btc" 
+      --http-addr="0.0.0.0:3002" 
+      --electrum-rpc-addr="0.0.0.0:60401" 
+      --daemon-rpc-addr="bitcoind:18443" 
+      --db-dir /electrs
+      --cors="*" 
+      --electrum-txs-limit=102400 
+      --utxos-limit=102400 
+      -vv
+  mempool-web:
+    networks:
+      - stacks
+    image: mempool/frontend:latest
+    container_name: mempool-web
+    stop_grace_period: 5s
+    depends_on:
+      - mempool-api
+      - mempool-db
+    user: "1000:1000"
+    restart: on-failure
+    ports:
+      - 8083:8083
+    environment:
+      FRONTEND_HTTP_PORT: *MEMPOOL_WEB_PORT
+      BACKEND_MAINNET_HTTP_HOST: "mempool-api"
+    command: "./wait-for mempool-db:3306 --timeout=720 -- nginx -g 'daemon off;'"
+  mempool-api:
+    networks:
+      - stacks
+    image: mempool/backend:latest
+    container_name: mempool-api
+    stop_grace_period: 5s
+    depends_on:
+      - electrs
+      - mempool-db
+    user: "1000:1000"
+    restart: on-failure
+    ports:
+      - 8999:8999
+    environment:
+      # Connect to electrs host
+      MEMPOOL_BACKEND: "electrum"
+      ELECTRUM_HOST: "electrs"
+      ELECTRUM_PORT: *ELECTRS_RPC_PORT 
+      ELECTRUM_TLS_ENABLED: "false"
+      # Connect to bitcoin rpc
+      CORE_RPC_HOST: bitcoind
+      CORE_RPC_PORT: *BITCOIN_RPC_PORT
+      CORE_RPC_USERNAME: *BITCOIN_RPC_USER
+      CORE_RPC_PASSWORD: *BITCOIN_RPC_PASS
+      # connec to mempool-db
+      DATABASE_ENABLED: "true"
+      DATABASE_HOST: "mempool-db"
+      DATABASE_DATABASE: *MEMPOOL_DB_DATABASE
+      DATABASE_USERNAME: *MEMPOOL_DB_USER
+      DATABASE_PASSWORD: *MEMPOOL_DB_PASSWORD
+      STATISTICS_ENABLED: "true"
+    command: "./wait-for-it.sh mempool-db:3306 --timeout=720 --strict -- ./start.sh"
+  mempool-db:
+    networks:
+      - stacks
+    image: mariadb:10.5.21
+    container_name: mempool-db
+    stop_grace_period: 5s
+    ports:
+      - 3306:3306
+    environment:
+      MYSQL_DATABASE: *MEMPOOL_DB_DATABASE
+      MYSQL_USER: *MEMPOOL_DB_USER
+      MYSQL_PASSWORD: *MEMPOOL_DB_PASSWORD
+      MYSQL_ROOT_PASSWORD: *MEMPOOL_DB_ROOT_PASSWORD
 networks:
   stacks:
 volumes:
   chainstate:
+  electrs_data:
+
